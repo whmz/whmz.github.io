@@ -58,7 +58,7 @@
         
           <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
         
-        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+        <a id="nav-search-btn" class="nav-icon" title="Suche"></a>
       </nav>
       <div id="search-form-wrap">
         <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://whmz.github.io"></form>
@@ -96,19 +96,9 @@
 <h2 id="问题时间点"><a href="#问题时间点" class="headerlink" title="问题时间点"></a>问题时间点</h2><p>我们运营的学校在这周开学，大概从周二开始，有用户投诉带宽问题。考虑带宽和限速模块没有做过调整，本来是很确信不会有问题，毕竟已经正常运行了那么久的系统了！但是周三，我们自己的客服也在反馈这个问题，并拿到了实际测试的结果：在各种带宽的测试环境下，基本达不到预期的值，特别是在50M环境下，一般还达不到20M。这样基本说明，问题点确实存在，需要详细排查下。</p>
 <h2 id="第一次检查"><a href="#第一次检查" class="headerlink" title="第一次检查"></a>第一次检查</h2><p>周三因为要解决另外的问题，在观察问题流量的同时，对系统做了次简单的检查。大致的流程如下：</p>
 <ol>
-<li><p>检查用户拨号后，下发的限速值是否正确</p>
-<blockquote>
-<blockquote>
-<p>这个可以通过syslog日志输出的限速参数检查，发现测速有问题的账号，实际限速参数并没有问题，上行20M，下行50M。在检查后再次测速，速率仍有较大差异。</p>
-</blockquote>
-</blockquote>
+<li><p>检查用户拨号后，下发的限速值是否正确<br> 这个可以通过syslog日志输出的限速参数检查，发现测速有问题的账号，实际限速参数并没有问题，上行20M，下行50M。在检查后再次测速，速率仍有较大差异。</p>
 </li>
-<li><p>检查限速参数是否正确应用到了tc的正确队列</p>
-<blockquote>
-<blockquote>
-<p>按上篇文章的介绍，用户IP和tc队列有个确定的对应关系，tc_class = (srcIP &amp; 0xff) + 1, 根据这个计算出用户队列，检查对应的上下行参数，正确。<br> ‘’’<br>  |<br>  +—(10:1daf) htb prio 1 rate 20Mbit ceil 20Mbit burst 1600b cburst 1600b<br>  |             Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) </p>
-</blockquote>
-</blockquote>
+<li><p>检查限速参数是否正确应用到了tc的正确队列<br> 按上篇文章的介绍，用户IP和tc队列有个确定的对应关系，tc_class = (srcIP &amp; 0xff) + 1, 根据这个计算出用户队列，检查对应的上下行参数，正确。<br> ‘’’<br>  |<br>  +—(10:1daf) htb prio 1 rate 20Mbit ceil 20Mbit burst 1600b cburst 1600b<br>  |             Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) </p>
 <h2 id="rate-0bit-0pps-backlog-0b-0p-requeues-0"><a href="#rate-0bit-0pps-backlog-0b-0p-requeues-0" class="headerlink" title="  |             rate 0bit 0pps backlog 0b 0p requeues 0 "></a>  |             rate 0bit 0pps backlog 0b 0p requeues 0 </h2><p>  |             rate 0bit 0pps backlog 0b 0p requeues 0<br>  |<br>  +—(10:1daf) htb prio 1 rate 50Mbit ceil 50Mbit burst 1600b cburst 1600b<br>  |             Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0)<br>  |             rate 0bit 0pps backlog 0b 0p requeues 0<br> ‘’’</p>
 </li>
 <li><p>经过这两步检查，发现用户速率没有问题，这时候怀疑是不是上行带宽实际上没有扩容？<br> 使用了<a href="https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py" target="_blank" rel="noopener">speettest的脚本</a> 检查服务器带宽：<br> ‘’’<br> wget <a href="https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py" target="_blank" rel="noopener">https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py</a><br> python speedtest.py<br> ‘’’<br> 检查发现，在当时负载比较高、接近扩容前带宽的情况下，速率仍能达到1957Mbps，可以判断出口带宽已经扩容了。</p>
@@ -157,7 +147,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://whmz.github.io/2018/03/10/ipmarks/" data-id="cjelgshdo000110wiubj2r25n" class="article-share-link">Share</a>
+      <a data-url="http://whmz.github.io/2018/03/10/ipmarks/" data-id="cjelgshdo000110wiubj2r25n" class="article-share-link">Teilen</a>
       
       
     </footer>
@@ -226,7 +216,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://whmz.github.io/2018/02/25/ss-hfsc/" data-id="cjelgshdv000210wif714xv8o" class="article-share-link">Share</a>
+      <a data-url="http://whmz.github.io/2018/02/25/ss-hfsc/" data-id="cjelgshdv000210wif714xv8o" class="article-share-link">Teilen</a>
       
       
     </footer>
@@ -269,7 +259,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://whmz.github.io/2018/02/25/hello/" data-id="cjelgshc4000010wihwe3tml4" class="article-share-link">Share</a>
+      <a data-url="http://whmz.github.io/2018/02/25/hello/" data-id="cjelgshc4000010wihwe3tml4" class="article-share-link">Teilen</a>
       
       
     </footer>
@@ -295,7 +285,7 @@
   
     
   <div class="widget-wrap">
-    <h3 class="widget-title">Archives</h3>
+    <h3 class="widget-title">Archiv</h3>
     <div class="widget">
       <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/03/">三月 2018</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">二月 2018</a></li></ul>
     </div>
@@ -305,7 +295,7 @@
   
     
   <div class="widget-wrap">
-    <h3 class="widget-title">Recent Posts</h3>
+    <h3 class="widget-title">letzter Beitrag</h3>
     <div class="widget">
       <ul>
         
