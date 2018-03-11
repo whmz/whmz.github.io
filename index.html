@@ -69,6 +69,237 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Strongswan-DAE" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/03/11/Strongswan-DAE/" class="article-date">
+  <time datetime="2018-03-11T13:17:06.000Z" itemprop="datePublished">2018-03-11</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2018/03/11/Strongswan-DAE/">Strongswan-DAE功能相关逻辑整理</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="目录"><a href="#目录" class="headerlink" title="目录"></a>目录</h2><ol>
+<li><p>概念</p>
+<ul>
+<li><p>DAE（Dynamic Authorization Extensions，动态授权扩展）协议是RFC 5176中定义的RADIUS协议的一个扩展，它用于强制认证用户下线，或者更改在线用户授权信息。DAE采用客户端/服务器通信模式，由DAE客户端和DAE服务器组成。</p>
+<p>  DAE客户端：用于发起DAE请求，通常驻留在一个RADIUS服务器上，也可以为一个单独的实体。</p>
+<p>  DAE服务器：用于接收并响应DAE客户端的DAE请求，通常为一个NAS（Network Access Server，网络接入服务器）设备。</p>
+</li>
+<li><p>DAE报文包括以下两种类型：</p>
+<p>  DMs（Disconnect Messages）：用于强制用户下线。DAE客户端通过向NAS设备发送DM请求报文，请求NAS设备按照指定的匹配条件强制用户下线。</p>
+<p>  COA（Change of Authorization）Messages：用于更改用户授权信息。DAE客户端通过向NAS设备发送COA请求报文，请求NAS设备按照指定的匹配条件更改用户授权信息。</p>
+<p>  在设备上使能RADIUS DAE服务后，设备将作为RADIUS DAE服务器在指定的UDP端口监听指定的RADIUS DAE客户端发送的DAE请求消息，然后根据请求消息进行用户授权信息的修改或断开用户连接，并向RADIUS DAE客户端发送DAE应答消息。</p>
+</li>
+</ul>
+</li>
+<li><p>Strongswan-DAE 问题分析</p>
+<ul>
+<li><p>现象</p>
+<ul>
+<li>某个用户登录认证连续多次提示已在线，踢下线没有效果；</li>
+<li>检查发现以下情况：<ul>
+<li>日志显示：用户13：50：57 认证成功，13：50：59 下线成功</li>
+<li>用户13：50之后一直access-reject，直到14：30左右成功登录</li>
+<li>radius处检查后，认为是进入会话异常呆死状态，根据已有逻辑，大概30分钟后才能结束该会话</li>
+<li>用户通过自理平台发起下线，14：09下线失败，返回 Dissconn-NAK；14：16有一次提示Dissconn-ACK，但是之后并没有实际踢下线；后续的踢下线都是NAK</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p>检查步骤和发现的问题</p>
+<ul>
+<li><p>网关日志检查</p>
+<ul>
+<li>确认用户13：50：57 认证成功，13：50：59 下线成功；下线时发送了Accounting-END，并且收到了Radius的响应报文</li>
+<li><p>确认14：16该用户有一次Dissconn-ACK报文，其他都是NAK</p>
+<p>结论：需要检查下Strongswan的DAE处理逻辑，看是什么问题</p>
+</li>
+</ul>
+</li>
+<li><p>使用Source Insight查看strongswan代码</p>
+<ul>
+<li><p>搜索dae代码会出现大量的daemon相关的代码，结果太多</p>
+</li>
+<li><p>搜索dae、大小写敏感、只搜索注释部分，找到了DAE的处理文件：              \strongswan\src\libcharon\plugins\eap_radius\eap_radius_dae.c</p>
+</li>
+<li><p>找到了DAE-disconn处理入口：process_disconnect，关键代码：</p>
+<ul>
+<li>ids = get_matching_ike_sas(this, radius_message_t *request, client);<ul>
+<li>根据request的属性信息查找对应的ike_sa</li>
+</ul>
+</li>
+<li>后续代码：<ul>
+<li>如果找到sa，则执行清理下线，发送给RMC_DISCONNECT_ACK报文；否则发送RMC_DISCONNECT_NAK。 打印日志信息的代码与日志匹配。确定是该处逻辑处理DAE</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p>get_matching_ike_sas(this, radius_message_t *request, client):</p>
+  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">while (enumerator-&gt;enumerate(enumerator, &amp;type, &amp;data))</span><br><span class="line">&#123;</span><br><span class="line">    if (type == RAT_USER_NAME &amp;&amp; data.len)</span><br><span class="line">    &#123;</span><br><span class="line">        user = identification_create_from_data(data);</span><br><span class="line">        DBG1(DBG_CFG, &quot;received RADIUS DAE %N for %Y from %H&quot;,</span><br><span class="line">            radius_message_code_names, request-&gt;get_code(request),</span><br><span class="line">            user, client);</span><br><span class="line">        add_matching_ike_sas(ids, user);</span><br><span class="line">        user-&gt;destroy(user);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<ul>
+<li><p>第一个关键点，处理dae-request时，仅使用了其中的RAT_USER_NAME数据，没有使用session-id… 结合用户行为，可以推测：</p>
+<ul>
+<li>用户边执行重试拨号、边执行了自理平台的下线操作</li>
+</ul>
+</li>
+<li><p>检查日志信息，发现有以下信息：</p>
+  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">    14:16:13 charon: 20[CFG] received RADIUS DAE Disconnect-Request for 1769136.... from 59.110.24.89</span><br><span class="line">    14:16:13 charon: 20[CFG] closing 1 IKE_SA matching Disconnect-Request, sending Disconnect-ACK</span><br><span class="line">    14:16:13 charon: 26[IKE] destroying IKE_SA in state CONNECTING without notification</span><br><span class="line">    ``` </span><br><span class="line">    网关认为是CONNECTING状态的会话，不需要做其他操作，因此不会给radius侧回复Account-END，这一点与Radius的日志信息匹配</span><br><span class="line"></span><br><span class="line">* 这个DAE使用用户名踢下线，具体会踢哪些会话，是否会全踢，还是只踢第一个：</span><br></pre></td></tr></table></figure>
+<p>  ids = get_matching_ike_sas(this, request, client);</p>
+<p>  if (ids-&gt;get_count(ids))<br>  {</p>
+<pre><code>DBG1(DBG_CFG, &quot;closing %d IKE_SA%s matching %N, sending %N&quot;,
+    ids-&gt;get_count(ids), ids-&gt;get_count(ids) &gt; 1 ? &quot;s&quot; : &quot;&quot;,
+    radius_message_code_names, RMC_DISCONNECT_REQUEST,
+    radius_message_code_names, RMC_DISCONNECT_ACK);
+
+enumerator = ids-&gt;create_enumerator(ids);
+while (enumerator-&gt;enumerate(enumerator, &amp;id))
+{
+    lib-&gt;processor-&gt;queue_job(lib-&gt;processor, (job_t*)
+                            delete_ike_sa_job_create(id, TRUE));
+}
+enumerator-&gt;destroy(enumerator);
+
+send_response(this, request, RMC_DISCONNECT_ACK, client);
+</code></pre><p>  }<br>  else{</p>
+<pre><code>...
+</code></pre><p>  }</p>
+  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">                    从代码看，get_matching_ike_sas返回的ids，都会执行清理操作。这一点需要注意，后续统一用户存在多个会话时，确实会存在误踢，把用户全部会话都踢掉</span><br><span class="line"></span><br><span class="line">    * DAE-COA</span><br><span class="line">        * 检查了COA的代码处理逻辑，process_coa,在处理时跟disconn一样，也只匹配了用户名字段，没有检查session-id是否一样。也就是说，后续如果启用COA功能，也面临一样的问题，会同时重置多个连接的在线时长。这一点可能还是有益的，当用户在线续费、或费用到期，可以同时停止或启用。</span><br><span class="line"></span><br><span class="line">3. DAE和超时时间</span><br><span class="line">    在实际执行中，发现有时候用户执行踢下线操作时，会延迟很长时间（几分钟），实际的下线操作才会成功。根据用户ID、IP、会话信息查找具体的会话DAE过程，发现这样一个情况：踢下线操作收到后，SS端先执行会话查找操作，找到会话后就发送ACK给Radius端，同时给会话的另一端发送一个断开连接的请求；如果用户还在线则很快响应这个报文下线；如果用户已经断开了网络（断开原先链接的Wifi、非断开IPSec连接），则会重发多次报文之后，才会执行断开操作。而只有断开操作成功后，才会给Radius端发送记账结束报文。</span><br><span class="line"></span><br><span class="line">    以下是超时时间的选择：</span><br></pre></td></tr></table></figure>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h1 id="etc-strongswan-d-charon-conf"><a href="#etc-strongswan-d-charon-conf" class="headerlink" title="/etc/strongswan.d/charon.conf"></a>/etc/strongswan.d/charon.conf</h1><h1 id="Base-to-use-for-calculating-exponential-back-off-see-IKEv2-RETRANSMISSION"><a href="#Base-to-use-for-calculating-exponential-back-off-see-IKEv2-RETRANSMISSION" class="headerlink" title="Base to use for calculating exponential back off, see IKEv2 RETRANSMISSION"></a>Base to use for calculating exponential back off, see IKEv2 RETRANSMISSION</h1><h1 id="in-strongswan-conf-5"><a href="#in-strongswan-conf-5" class="headerlink" title="in strongswan.conf(5)."></a>in strongswan.conf(5).</h1><h1 id="retransmit-base-1-8"><a href="#retransmit-base-1-8" class="headerlink" title="retransmit_base = 1.8"></a>retransmit_base = 1.8</h1><h1 id="Timeout-in-seconds-before-sending-first-retransmit"><a href="#Timeout-in-seconds-before-sending-first-retransmit" class="headerlink" title="Timeout in seconds before sending first retransmit."></a>Timeout in seconds before sending first retransmit.</h1><p>retransmit_timeout = 4.0</p>
+<h1 id="Number-of-times-to-retransmit-a-packet-before-giving-up"><a href="#Number-of-times-to-retransmit-a-packet-before-giving-up" class="headerlink" title="Number of times to retransmit a packet before giving up."></a>Number of times to retransmit a packet before giving up.</h1><p>retransmit_tries = 5</p>
+<h1 id="Interval-to-use-when-retrying-to-initiate-an-IKE-SA-e-g-if-DNS"><a href="#Interval-to-use-when-retrying-to-initiate-an-IKE-SA-e-g-if-DNS" class="headerlink" title="Interval to use when retrying to initiate an IKE_SA (e.g. if DNS"></a>Interval to use when retrying to initiate an IKE_SA (e.g. if DNS</h1><h1 id="resolution-failed-0-to-disable-retries"><a href="#resolution-failed-0-to-disable-retries" class="headerlink" title="resolution failed), 0 to disable retries."></a>resolution failed), 0 to disable retries.</h1><h1 id="retry-initiate-interval-0"><a href="#retry-initiate-interval-0" class="headerlink" title="retry_initiate_interval = 0"></a>retry_initiate_interval = 0</h1><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">通过man strongswan.conf 查找了超时时间一节：</span><br></pre></td></tr></table></figure>
+<p>IKEv2 RETRANSMISSION<br> Retransmission timeouts in the IKEv2 daemon charon can be configured globally using the three keys listed below:</p>
+<pre><code>charon.retransmit_base [1.8]
+charon.retransmit_timeout [4.0]
+charon.retransmit_tries [5]
+charon.retransmit_jitter [0]
+charon.retransmit_limit [0]
+</code></pre><p> The following algorithm is used to calculate the timeout:</p>
+<pre><code>relative timeout = retransmit_timeout * retransmit_base ^ (n-1)
+</code></pre><p> Where  n  is  the  current  retransmission count. The calculated timeout can’t exceed the configured retransmit_limit (if<br> any), which is useful if the number of retries is high.</p>
+<p> If a jitter in percent is configured, the timeout is modified as follows:</p>
+<pre><code>relative timeout -= random(0, retransmit_jitter * relative timeout)
+</code></pre><p> Using the default values, packets are retransmitted in:</p>
+<p> Retransmission   Relative Timeout   Absolute Timeout<br> ─────────────────────────────────────────────────────<br> 1                              4s                 4s<br> 2                              7s                11s<br> 3                             13s                24s<br> 4                             23s                47s<br> 5                             42s                89s<br> giving up                     76s               165s</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">根据我们跟踪的日志信息，发下上述时间跟日志输出的时间间隔一致。考虑到安全问题，IPSec这样设计超时也许没问题，在我们的接入应用中，这么长的超时时间没法接受，我们把两个参数修改了</span><br></pre></td></tr></table></figure>
+<h1 id="Timeout-in-seconds-before-sending-first-retransmit-1"><a href="#Timeout-in-seconds-before-sending-first-retransmit-1" class="headerlink" title="Timeout in seconds before sending first retransmit."></a>Timeout in seconds before sending first retransmit.</h1><p>retransmit_timeout = 3.0</p>
+<h1 id="Number-of-times-to-retransmit-a-packet-before-giving-up-1"><a href="#Number-of-times-to-retransmit-a-packet-before-giving-up-1" class="headerlink" title="Number of times to retransmit a packet before giving up."></a>Number of times to retransmit a packet before giving up.</h1><p>retransmit_tries = 3</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">根据它的超时算法，修改后的超时时间为：</span><br></pre></td></tr></table></figure>
+<p>Retransmission   Relative Timeout   Absolute Timeout<br>─────────────────────────────────────────────────────<br>1                              3s                 3s<br>2                            5.4s               8.4s<br>3                            9.7s              18.1s<br>giving up                   17.5s              35.6s</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">    这样已经能兼顾丢包和处理效率，在局域网内效果已经可以保证。</span><br><span class="line"></span><br><span class="line">4. 如何根据DAE获取并匹配session-id</span><br><span class="line">    后续如果需要修改这块的逻辑，需要根据DAE报文中的session-id，查找ike_sa，应用新的授权信息。</span><br><span class="line"></span><br><span class="line">    * 已有的dae代码已经能根据用户名获取到用户名匹配的ike_sa</span><br><span class="line"></span><br><span class="line">    * SESSION-ID</span><br><span class="line">        * 根据radius的DAE报文，找到了session-id对应的attribute-type：\strongswan\src\libradius\radius_message.h,</span><br><span class="line">            * RAT_ACCT_SESSION_ID = 44,</span><br><span class="line">        </span><br><span class="line">        * 初始化:</span><br><span class="line">            在发送Accounting-Start时开始获取或创建：get_or_create</span><br></pre></td></tr></table></figure>
+<pre><code>/**
+* Send an accounting start message
+*/
+static void send_start(private_eap_radius_accounting_t *this, ike_sa_t *ike_sa)
+{
+    ...
+
+    entry_t *entry;
+
+    ...
+
+    entry = get_or_create_entry(this, ike_sa-&gt;get_id(ike_sa),
+                                ike_sa-&gt;get_unique_id(ike_sa));
+
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">创建时，实际调用了这些操作(unique会记录到syslog中)：</span><br></pre></td></tr></table></figure>
+
+snprintf(entry-&gt;sid, sizeof(entry-&gt;sid), &quot;%u-%u&quot;, this-&gt;prefix, unique);
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">其中的prefix信息是这么生成的：</span><br></pre></td></tr></table></figure>
+
+eap_radius_accounting_t *eap_radius_accounting_create()
+{
+    ...
+
+    /* use system time as Session ID prefix */
+    .prefix = (uint32_t)time(NULL),
+
+    ...
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">unique_id是个递增的值，每创建一个ike_sa加1：</span><br></pre></td></tr></table></figure>
+
+ike_sa_t * ike_sa_create(ike_sa_id_t *ike_sa_id, bool initiator,
+        ike_version_t version)
+{
+    private_ike_sa_t *this;
+    static refcount_t unique_id = 0;
+
+    .unique_id = ref_get(&amp;unique_id),
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"> </span><br></pre></td></tr></table></figure>
+
+/**
+* Increase refcount
+*/
+refcount_t ref_get(refcount_t *ref)
+{
+    refcount_t current;
+
+    ref_lock-&gt;lock(ref_lock);
+    current = ++(*ref);
+    ref_lock-&gt;unlock(ref_lock);
+
+    return current;
+}
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">* 参考上述代码，仿照get_or_create 功能，仅使用get部分的代码：</span><br><span class="line">    * \src\libcharon\plugins\eap_radius\eap_radius_plugin.c: plugin_cb</span><br><span class="line">    此处为已有代码，在创建dae时已经给赋值了accounting对象：</span><br></pre></td></tr></table></figure>
+</code></pre><p>  this-&gt;accounting = eap_radius_accounting_create();<br>  this-&gt;forward = eap_radius_forward_create();<br>  this-&gt;provider = eap_radius_provider_create();</p>
+<p>  load_configs(this);</p>
+<p>  if (lib-&gt;settings-&gt;get_bool(lib-&gt;settings,</p>
+<pre><code>&quot;%s.plugins.eap-radius.dae.enable&quot;, FALSE, lib-&gt;ns))
+</code></pre><p>  {</p>
+<pre><code>this-&gt;dae = eap_radius_dae_create(this-&gt;accounting);
+</code></pre><p>  }</p>
+  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">在src\libcharon\plugins\eap_radius\eap_radius_accounting.c 中添加get_session_id方法(示例，后续要加锁)：</span><br></pre></td></tr></table></figure>
+<p>  static char <em> get_session_id(private_eap_radius_accounting_t </em>this,</p>
+<pre><code>ike_sa_id_t *id)
+</code></pre><p>  {</p>
+<pre><code>entry_t *entry;
+entry = this-&gt;sessions-&gt;get(this-&gt;sessions, id);
+return entry-&gt;sid; //char sid[24];
+</code></pre><p>  }</p>
+  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">在src\libcharon\plugins\eap_radius\eap_radius_dae.c中需要使用sid的地方调用(示例，后续要加锁、要判断是否为空)：</span><br></pre></td></tr></table></figure>
+<p>  static char <em> get_session_id(private_eap_radius_dae_t </em>this,</p>
+<pre><code>ike_sa_id_t *id)
+</code></pre><p>  {</p>
+<pre><code>return this-&gt;accounting-&gt;get_session_id(this-&gt;accounting,id);
+</code></pre><p>  }</p>
+  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line">5. 其他发现</span><br><span class="line">    * account-stop 通过触发方式调用，在连接断开时，通过 up_down 调用</span><br><span class="line">    * 发送accounting时，会附带RAT_NAS_IP_ADDRESSs属性，这个值一般情况下是提供VPN服务的端口IP；当用户通过非园区网络连接时，也就是用户网络切换后，如果服务器到用户的路由切换到外网口，这个值会变成对应的外网口IP：</span><br><span class="line">        ``` </span><br><span class="line">    	Acct-Session-Id = &quot;1514557340-10756&quot;</span><br><span class="line">       	NAS-IP-Address = 218.195.95.16</span><br><span class="line">        Called-Station-Id = &quot;218.195.95.16[4500]&quot;</span><br><span class="line">        Calling-Station-Id = &quot;172.17.57.196[60232]&quot;</span><br></pre></td></tr></table></figure>
+  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">Acct-Session-Id = &quot;1514557340-10756&quot;</span><br><span class="line">   NAS-IP-Address = 111.21.65.2</span><br><span class="line">   Called-Station-Id = &quot;111.21.65.2[4500]&quot;</span><br><span class="line">   Calling-Station-Id = &quot;113.200.106.45[25978]&quot;</span><br></pre></td></tr></table></figure>
+</li>
+<li><p>当网关收到用户侧发过来的数据时，会根据src和dst更新ike_sa中的host信息</p>
+</li>
+</ul>
+</li>
+</ol>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://whmz.github.io/2018/03/11/Strongswan-DAE/" data-id="cjemtrc2700001owibhv520s5" class="article-share-link">Teilen</a>
+      
+      
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-ipmarks" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2018/03/10/ipmarks/" class="article-date">
@@ -137,11 +368,10 @@
 </ol>
 <p>后续客服联系了speedtest的限速，请求排查限速的问题，怀疑是测速站点被限速了，但在等反馈结果。</p>
 <h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><ol>
-<li>mark参数问题：最早设计时，单网关考虑4096个设备，准备采用20位地址掩码，这样计算用户的mark值只需要0xfff就够了。但是后期发现，尽量给同一账号的用户分配相同地址，这样实际占用的地址数多于在线用户数，最终使用了18位地址掩码、16384个地址，相应的mark掩码就需要调整为0x3fff。但是，部署发现问题后，只在master基线修改了代码，并没有更新部署包。</li>
-</ol>
-<p>新服务部署时，一般不会去检查、修改某个特殊的参数；在小规模测试时，也不会触发这个问题（登录设备大于4096才会触发问题），所以直到用户规模足够，才发现了问题。</p>
-<ol>
-<li>测速反应的是客户端到测速服务器的速度，只要360能达到限速值，就说明网关没限速；但对用户来说速率实际没有达到标称值。</li>
+<li><p>mark参数问题：最早设计时，单网关考虑4096个设备，准备采用20位地址掩码，这样计算用户的mark值只需要0xfff就够了。但是后期发现，尽量给同一账号的用户分配相同地址，这样实际占用的地址数多于在线用户数，最终使用了18位地址掩码、16384个地址，相应的mark掩码就需要调整为0x3fff。但是，部署发现问题后，只在master基线修改了代码，并没有更新部署包。新服务部署时，一般不会去检查、修改某个特殊的参数；在小规模测试时，也不会触发这个问题（登录设备大于4096才会触发问题），所以直到用户规模足够，才发现了问题。</p>
+</li>
+<li><p>测速反应的是客户端到测速服务器的速度，只要360能达到限速值，就说明网关没限速；但对用户来说速率实际没有达到标称值。</p>
+</li>
 </ol>
 <h2 id="改进措施"><a href="#改进措施" class="headerlink" title="改进措施"></a>改进措施</h2><ol>
 <li>修改参数后，应及时评估相关改动，对所有涉及的数据做检查，修正数据；</li>
@@ -303,6 +533,10 @@
     <h3 class="widget-title">letzter Beitrag</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2018/03/11/Strongswan-DAE/">Strongswan-DAE功能相关逻辑整理</a>
+          </li>
         
           <li>
             <a href="/2018/03/10/ipmarks/">一个流量标记问题导致的限速Bug</a>

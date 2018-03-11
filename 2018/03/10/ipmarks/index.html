@@ -14,7 +14,7 @@
 <meta property="og:site_name" content="Welcom to whmz&#39;s Blog">
 <meta property="og:description" content="继续之前限速脚本的话题，本次整理下处理的一个限速Bug。 近期对网络出口做了扩容，按监控的带宽数据来算，目前有20%左右的裕量，按说用户那边不再那么卡了，但是这周总是接到用户投诉说网速达不到，并发了相应的截图。为了排查具体的情况，在周三、四做了两次的问题排查，终于发现了问题点。本文简单记录下问题发现和排查过程。 问题时间点我们运营的学校在这周开学，大概从周二开始，有用户投诉带宽问题。考虑带宽和限速">
 <meta property="og:locale" content="zh-cn">
-<meta property="og:updated_time" content="2018-03-10T14:34:44.292Z">
+<meta property="og:updated_time" content="2018-03-10T14:36:21.326Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="一个流量标记问题导致的限速Bug">
 <meta name="twitter:description" content="继续之前限速脚本的话题，本次整理下处理的一个限速Bug。 近期对网络出口做了扩容，按监控的带宽数据来算，目前有20%左右的裕量，按说用户那边不再那么卡了，但是这周总是接到用户投诉说网速达不到，并发了相应的截图。为了排查具体的情况，在周三、四做了两次的问题排查，终于发现了问题点。本文简单记录下问题发现和排查过程。 问题时间点我们运营的学校在这周开学，大概从周二开始，有用户投诉带宽问题。考虑带宽和限速">
@@ -136,11 +136,10 @@
 </ol>
 <p>后续客服联系了speedtest的限速，请求排查限速的问题，怀疑是测速站点被限速了，但在等反馈结果。</p>
 <h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><ol>
-<li>mark参数问题：最早设计时，单网关考虑4096个设备，准备采用20位地址掩码，这样计算用户的mark值只需要0xfff就够了。但是后期发现，尽量给同一账号的用户分配相同地址，这样实际占用的地址数多于在线用户数，最终使用了18位地址掩码、16384个地址，相应的mark掩码就需要调整为0x3fff。但是，部署发现问题后，只在master基线修改了代码，并没有更新部署包。</li>
-</ol>
-<p>新服务部署时，一般不会去检查、修改某个特殊的参数；在小规模测试时，也不会触发这个问题（登录设备大于4096才会触发问题），所以直到用户规模足够，才发现了问题。</p>
-<ol>
-<li>测速反应的是客户端到测速服务器的速度，只要360能达到限速值，就说明网关没限速；但对用户来说速率实际没有达到标称值。</li>
+<li><p>mark参数问题：最早设计时，单网关考虑4096个设备，准备采用20位地址掩码，这样计算用户的mark值只需要0xfff就够了。但是后期发现，尽量给同一账号的用户分配相同地址，这样实际占用的地址数多于在线用户数，最终使用了18位地址掩码、16384个地址，相应的mark掩码就需要调整为0x3fff。但是，部署发现问题后，只在master基线修改了代码，并没有更新部署包。新服务部署时，一般不会去检查、修改某个特殊的参数；在小规模测试时，也不会触发这个问题（登录设备大于4096才会触发问题），所以直到用户规模足够，才发现了问题。</p>
+</li>
+<li><p>测速反应的是客户端到测速服务器的速度，只要360能达到限速值，就说明网关没限速；但对用户来说速率实际没有达到标称值。</p>
+</li>
 </ol>
 <h2 id="改进措施"><a href="#改进措施" class="headerlink" title="改进措施"></a>改进措施</h2><ol>
 <li>修改参数后，应及时评估相关改动，对所有涉及的数据做检查，修正数据；</li>
@@ -159,6 +158,15 @@
   
     
 <nav id="article-nav">
+  
+    <a href="/2018/03/11/Strongswan-DAE/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Neuer</strong>
+      <div class="article-nav-title">
+        
+          Strongswan-DAE功能相关逻辑整理
+        
+      </div>
+    </a>
   
   
     <a href="/2018/02/25/ss-hfsc/" id="article-nav-older" class="article-nav-link-wrap">
@@ -198,6 +206,10 @@
     <h3 class="widget-title">letzter Beitrag</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2018/03/11/Strongswan-DAE/">Strongswan-DAE功能相关逻辑整理</a>
+          </li>
         
           <li>
             <a href="/2018/03/10/ipmarks/">一个流量标记问题导致的限速Bug</a>
